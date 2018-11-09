@@ -17,6 +17,33 @@ public final class FileMiddleware: Middleware {
     }
 
     public func respond(to request: Request, chainingTo next: Responder) throws -> Response {
+        if let rangeHeader = request.headers["Range"] {
+            if rangeHeader.starts(with: "bytes=") {
+                let rangeString = String(rangeHeader.dropFirst(6))
+                let split = rangeString.split(separator: "-")
+                if split.count == 2, let start = Int(split[0]), let end = Int(split[1]) {
+                    var path = request.uri.path
+                    guard !path.contains("../") else { throw HTTP.Status.forbidden }
+                    if path.hasPrefix("/") {
+                        path = String(path.toCharacterSequence().dropFirst())
+                    }
+                    let filePath = publicDir + path
+                    if let data = NSData(contentsOfFile: filePath) {
+                        let length = end - start + 1
+                        if length > 0 { //}, length < data.length {
+                            let retValue = data.subdata(with: NSRange(location: start, length: length))
+                            let headers: [HeaderKey: String] = [
+                                HeaderKey.contentLength: "\(length)",
+                                HeaderKey.contentRange: "bytes \(start)-\(end)/\(data.length)",
+                                HeaderKey.acceptRanges: "bytes"
+                            ]
+                            let response = Response(status: .partialContent, headers: headers, body: retValue)
+                            return response
+                        }
+                    }
+                }
+            }
+        }
         do {
             return try next.respond(to: request)
         } catch RouterError.missingRoute {
